@@ -1,0 +1,100 @@
+library(rvest)
+library(dplyr)
+library(stringr)
+library(ggimage)
+library(gt
+
+url <- 'https://www.spotrac.com/mlb/disabled-list/2019/cumulative-player/pitching/'
+
+table <- url %>%
+    read_html() %>%
+    html_table()
+
+names <- url %>%
+  read_html() %>%
+  html_nodes('#player-season a') %>%
+  html_text()
+
+table <- as.data.frame(table[[4]])
+
+head(table)
+
+table <- table[,-1]                           # remove the first player name column     
+
+names <- as.data.frame(names)                 # names table is also a list so we need to turn it into a data frame
+
+table <- table[-314,]                         # it has an empty row so we remove it
+
+data <- cbind(names, table)                   # combines the table and the names data frames
+
+data <- data %>%
+  select(name=names, Team, Injury, Status, Days, cash_earned=`Cash EarnedWhile on DL`)
+
+data$cash_earned <- as.numeric(str_replace_all(data$cash_earned, "([$,])", ""))
+
+knitr::kable(head(data))
+
+data$Team <- str_replace(data$Team, 'CHW','CWS')
+
+team_injuries <- data %>%
+  count(Team) %>%
+  left_join(mlb_logo %>% select(tm, logo), by=c('Team' = 'tm'))
+
+ggplot(team_injuries %>% filter(!is.na(logo)), aes(reorder(Team, n), y=n)) +
+  geom_bar(aes(fill = Team),color='white', stat = 'identity', width = .75)+
+  geom_image(aes(image=logo), nudge_y = .45, size=.045)+
+  scale_fill_manual(values=c('#a71930','#ce1141','#df4601','#bd3039','#cc3433',
+                             '#c6011f', '#e31937','#333366','#000000','#001A57','#002d62','#005DAA',
+                             '#CC0000','#005a9c','#ff6600', '#00204e','#0a2351','#ff5910',
+                             '#003087', '#003831','#284898','#fdb827','#002d62','#fd5a1e',
+                             '#0c2c56','#c41e3a','#092c5c','#c0111f','#134a8e','#ab0003'))+
+  hrbrthemes::theme_ipsum()+
+  theme(legend.position = 'none',
+        axis.text.x = element_blank(),
+        plot.title = element_text(hjust = .5, face = 'bold'),
+    plot.subtitle = element_text(hjust = .5, face = 'italic'))+
+  labs(title = 'Total Pitcher Injuries in 2019',
+       subtitle = 'Injuries exclusive to one team.',
+       x='',
+       y='Total Players',
+       caption = 'Data: Spotrac') 
+       
+temp <- data %>%
+  count(Injury, name = 'tot_inj')
+
+ggplot(data = temp %>% filter(!(str_detect(Injury, '/'))), aes(reorder(Injury, tot_inj), y=tot_inj))+
+  geom_bar(color = 'white', fill = 'blue', stat = 'identity')+
+  hrbrthemes::theme_ipsum()+
+  coord_flip()+
+  theme(axis.text.y = element_text(size=7))+
+  labs(title = 'Types of Injuries',
+       y= 'Total',
+       x = 'Injury',
+       caption = 'Data: Spotrac')
+       
+ player <- data %>%
+  arrange(desc(cash_earned)) %>%
+  head(20)%>%
+  mutate(Days = as.numeric(Days))
+
+player %>%
+  mutate(Team = tolower(Team)) %>%
+gt() %>%
+  text_transform(locations = cells_body(vars(Team)), 
+                     fn = function(x) web_image(url = paste0('https://a.espncdn.com/i/teamlogos/mlb/500/',x, '.png'))  ) %>%
+  data_color(
+    columns = vars(cash_earned),
+    colors = scales::col_numeric(
+    palette = c(
+        "springgreen3","seagreen1"),
+    domain = c(33822513, 6317223)
+  )) %>%
+  data_color(
+    columns = vars(Days),
+    colors = scales::col_numeric(
+    palette = c(
+        "gold","goldenrod4"),
+    domain = c(699, 42)
+  )) %>%
+  tab_header(title = md('**Top Earners on the IL**'),
+             subtitle = md('Year: *2019*'))
